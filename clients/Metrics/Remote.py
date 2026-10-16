@@ -253,6 +253,16 @@ def _install_windows_authorized_key(username, public_key):
         "icacls $sshDir /inheritance:r /grant:r "
         "\"${Account}:(OI)(CI)F\" 'SYSTEM:(OI)(CI)F' | Out-Null; "
         "if ($LASTEXITCODE -ne 0) { throw 'Не удалось настроить права .ssh' }; "
+        # Repair the file ACL explicitly: resetting the directory tree may leave
+        # a pre-existing file with a deny ACE on some Windows ACL configurations.
+        "$keyFile = Get-ChildItem -LiteralPath $sshDir -Filter 'authorized_keys' -Force -ErrorAction SilentlyContinue | Select-Object -First 1; "
+        "if ($keyFile) { "
+        "icacls $authorizedKeys /reset | Out-Null; "
+        "if ($LASTEXITCODE -ne 0) { throw 'Не удалось восстановить ACL authorized_keys' }; "
+        "icacls $authorizedKeys /setowner $Account | Out-Null; "
+        "if ($LASTEXITCODE -ne 0) { throw 'Не удалось настроить владельца authorized_keys' }; "
+        "icacls $authorizedKeys /inheritance:r /grant:r \"${Account}:F\" 'SYSTEM:F' | Out-Null; "
+        "if ($LASTEXITCODE -ne 0) { throw 'Не удалось настроить права authorized_keys' } }; "
         "if (-not (Test-Path $authorizedKeys) -or "
         "-not (Select-String -Path $authorizedKeys -SimpleMatch $Key -Quiet)) { "
         "Add-Content -Path $authorizedKeys -Value $Key -Encoding ascii }; "
