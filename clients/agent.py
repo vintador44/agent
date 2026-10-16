@@ -584,6 +584,7 @@ def handle_server_command(cmd, server_ip):
             request = json.loads(cmd[len("CONFIGURE_SSH:"):])
             if not request.get("request_id") or not request.get("username") or not request.get("public_key"):
                 raise ValueError("неполная команда настройки SSH")
+            log_message("Получена команда CONFIGURE_SSH; начинаю настройку SSH.")
             threading.Thread(target=configure_ssh, args=(request,), daemon=True).start()
         except (json.JSONDecodeError, ValueError) as e:
             log_message(f"Некорректная команда настройки SSH: {e}")
@@ -597,6 +598,7 @@ def configure_ssh(request):
         "error": "",
     }
     try:
+        log_message("Настраиваю SSH; установка OpenSSH Server может занять несколько минут.")
         Metrics.configure_ssh(request["username"], request["public_key"])
         result["success"] = True
         log_message(f"SSH настроен для пользователя {request['username']}")
