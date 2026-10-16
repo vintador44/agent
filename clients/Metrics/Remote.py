@@ -250,19 +250,17 @@ def _install_windows_authorized_key(username, public_key):
         "if ($LASTEXITCODE -ne 0) { throw 'Не удалось восстановить ACL каталога .ssh' }; "
         "icacls $sshDir /setowner $Account | Out-Null; "
         "if ($LASTEXITCODE -ne 0) { throw 'Не удалось настроить владельца .ssh' }; "
+        # The elevated agent may run as another administrator (for example,
+        # timber), so retain Administrators access while it repairs/reads the file.
         "icacls $sshDir /inheritance:r /grant:r "
-        "\"${Account}:(OI)(CI)F\" 'SYSTEM:(OI)(CI)F' | Out-Null; "
+        "\"${Account}:(OI)(CI)F\" 'SYSTEM:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null; "
         "if ($LASTEXITCODE -ne 0) { throw 'Не удалось настроить права .ssh' }; "
-        # Repair the file ACL explicitly: resetting the directory tree may leave
-        # a pre-existing file with a deny ACE on some Windows ACL configurations.
-        "$keyFile = Get-ChildItem -LiteralPath $sshDir -Filter 'authorized_keys' -Force -ErrorAction SilentlyContinue | Select-Object -First 1; "
-        "if ($keyFile) { "
-        "icacls $authorizedKeys /reset | Out-Null; "
-        "if ($LASTEXITCODE -ne 0) { throw 'Не удалось восстановить ACL authorized_keys' }; "
-        "icacls $authorizedKeys /setowner $Account | Out-Null; "
-        "if ($LASTEXITCODE -ne 0) { throw 'Не удалось настроить владельца authorized_keys' }; "
-        "icacls $authorizedKeys /inheritance:r /grant:r \"${Account}:F\" 'SYSTEM:F' | Out-Null; "
-        "if ($LASTEXITCODE -ne 0) { throw 'Не удалось настроить права authorized_keys' } }; "
+        # Repair the file directly before Test-Path; PowerShell's provider can
+        # throw UnauthorizedAccessException for an existing file with a bad ACL.
+        "& takeown /F $authorizedKeys /A 2>&1 | Out-Null; "
+        "& icacls $authorizedKeys /reset 2>&1 | Out-Null; "
+        "& icacls $authorizedKeys /setowner $Account 2>&1 | Out-Null; "
+        "& icacls $authorizedKeys /inheritance:r /grant:r \"${Account}:F\" 'SYSTEM:F' '*S-1-5-32-544:F' 2>&1 | Out-Null; "
         "if (-not (Test-Path $authorizedKeys) -or "
         "-not (Select-String -Path $authorizedKeys -SimpleMatch $Key -Quiet)) { "
         "Add-Content -Path $authorizedKeys -Value $Key -Encoding ascii }; "
@@ -271,6 +269,8 @@ def _install_windows_authorized_key(username, public_key):
         "icacls $authorizedKeys /inheritance:r /grant:r "
         "\"${Account}:F\" 'SYSTEM:F' | Out-Null; "
         "if ($LASTEXITCODE -ne 0) { throw 'Не удалось настроить права authorized_keys' }"
+        "; icacls $authorizedKeys /remove:g '*S-1-5-32-544' | Out-Null; "
+        "if ($LASTEXITCODE -ne 0) { throw 'Не удалось удалить временные права Administrators с authorized_keys' }"
     )
 
 
