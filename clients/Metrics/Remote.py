@@ -5,6 +5,7 @@ import subprocess, shutil
 import base64
 import re
 import secrets
+import ctypes
 
 
 def _run(cmd, check=False):
@@ -77,13 +78,36 @@ def discover_server_ip(udp_port):
         return None
     
 def ps(cmd: str):
+    powershell = "powershell"
+    if os.name == "nt" and os.environ.get("PROCESSOR_ARCHITEW6432"):
+        powershell = os.path.join(
+            os.environ.get("WINDIR", r"C:\Windows"),
+            "Sysnative",
+            "WindowsPowerShell",
+            "v1.0",
+            "powershell.exe",
+        )
     result = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", cmd],
+        [powershell, "-NoProfile", "-Command", cmd],
         capture_output=True,
         text=True,
-        check=True,
     )
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout).strip()
+        if len(details) > 2000:
+            details = details[-2000:]
+        raise RuntimeError(
+            f"PowerShell завершился с кодом {result.returncode}"
+            + (f": {details}" if details else " без текста ошибки")
+        )
     return result.stdout.strip()
+
+
+def _is_windows_admin():
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
 
 
 def enable_ssh_windows():
@@ -206,6 +230,7 @@ def _install_windows_authorized_key(username, public_key):
     ps(
         "$ErrorActionPreference = 'Stop'; "
         f"$User = '{username}'; "
+        "$Account = $env:COMPUTERNAME + '\\' + $User; "
         f"$Key = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded_key}')); "
         "if (-not (Get-LocalUser -Name $User -ErrorAction SilentlyContinue)) { "
         "$rng = New-Object System.Security.Cryptography.RNGCryptoServiceProvider; "
@@ -220,15 +245,15 @@ def _install_windows_authorized_key(username, public_key):
         "if (-not (Test-Path $authorizedKeys) -or "
         "-not (Select-String -Path $authorizedKeys -SimpleMatch $Key -Quiet)) { "
         "Add-Content -Path $authorizedKeys -Value $Key -Encoding ascii }; "
-        "icacls $sshDir /setowner $User | Out-Null; "
+        "icacls $sshDir /setowner $Account | Out-Null; "
         "if ($LASTEXITCODE -ne 0) { throw 'Не удалось настроить владельца .ssh' }; "
         "icacls $sshDir /inheritance:r /grant:r "
-        "\"${User}:(OI)(CI)F\" 'SYSTEM:(OI)(CI)F' | Out-Null; "
+        "\"${Account}:(OI)(CI)F\" 'SYSTEM:(OI)(CI)F' | Out-Null; "
         "if ($LASTEXITCODE -ne 0) { throw 'Не удалось настроить права .ssh' }; "
-        "icacls $authorizedKeys /setowner $User | Out-Null; "
+        "icacls $authorizedKeys /setowner $Account | Out-Null; "
         "if ($LASTEXITCODE -ne 0) { throw 'Не удалось настроить владельца authorized_keys' }; "
         "icacls $authorizedKeys /inheritance:r /grant:r "
-        "\"${User}:F\" 'SYSTEM:F' | Out-Null; "
+        "\"${Account}:F\" 'SYSTEM:F' | Out-Null; "
         "if ($LASTEXITCODE -ne 0) { throw 'Не удалось настроить права authorized_keys' }"
     )
 
@@ -242,6 +267,11 @@ def configure_ssh(username, public_key):
         _install_linux_authorized_key(username, public_key)
         enable_ssh_linux()
     elif system == "Windows":
+        if not _is_windows_admin():
+            raise PermissionError(
+                "агент должен быть запущен от имени администратора Windows "
+                "для создания SSH-пользователя и настройки службы sshd"
+            )
         _install_windows_authorized_key(username, public_key)
         enable_ssh_windows()
     else:

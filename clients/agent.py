@@ -545,11 +545,14 @@ def handle_server_command(cmd, server_ip):
     elif cmd == "START_SHELL":
         threading.Thread(target=remote_shell_client, args=(server_ip,), daemon=True).start()
     elif cmd == "START_RDP" and platform.system() in ("Windows", "Linux"):
+        log_message(f"RDP: received START_RDP; opening connection to {server_ip}:{RDP_PORT}")
         threading.Thread(
-        target=remote_desktop_client,
-        args=(server_ip,),
-        daemon=True,
-    ).start()
+            target=remote_desktop_client,
+            args=(server_ip,),
+            daemon=True,
+        ).start()
+    elif cmd == "START_RDP":
+        log_message(f"RDP: this platform is not supported ({platform.system()})")
     elif cmd == "CLEAR_TEMP":
         threading.Thread(target=clear_temp_files, daemon=True).start()
     elif cmd.startswith("KILL_PID:"):
